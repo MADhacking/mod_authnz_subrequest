@@ -1,0 +1,22 @@
+
+mod_subreqonly - Apache 2 module to hide resources from normal requests
+                 allowing access only to sub-requests
+
+Homepage: 
+   http://www.mad-hacking.net/
+
+Building:
+   Run:
+      $ ./configure --with-apxs=/usr/sbin/apxs
+      $ make
+      $ make install
+
+Configuration:
+   Edit httpd.conf and add:
+      LoadModule subreqonly_module modules/mod_transform.so
+
+   Simple usage:
+      AddOutputFilter SubReqOnly xslt
+      SubReqOnlyOptions AllowApacheFS
+
+   Would hide all xslt files from all but ApacheFS sub-requests.
