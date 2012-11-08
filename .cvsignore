@@ -3,3 +3,6 @@
 Makefile.in
 configure
 aclocal.m4
+config.status
+Makefile
+libtool

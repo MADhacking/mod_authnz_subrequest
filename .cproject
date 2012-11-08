@@ -40,7 +40,6 @@
 							<tool id="org.eclipse.linuxtools.cdt.autotools.core.toolchain.tool.gpp.939604876" name="GCC C++ Compiler" superClass="org.eclipse.linuxtools.cdt.autotools.core.toolchain.tool.gpp"/>
 						</toolChain>
 					</folderInfo>
-					<fileInfo id="org.eclipse.linuxtools.cdt.autotools.core.configuration.build.642836564.255878616" name="Makefile.in" rcbsApplicability="disable" resourcePath="Makefile.in" toolsToInvoke=""/>
 					<sourceEntries>
 						<entry flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="include"/>
 						<entry flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="src"/>
@@ -423,18 +422,18 @@
 				<useDefaultCommand>true</useDefaultCommand>
 				<runAllBuilders>false</runAllBuilders>
 			</target>
-			<target name="mod_subreqonly.la" path="" targetID="org.eclipse.cdt.build.MakeTargetBuilder">
+			<target name="mod_authnz_subrequest.la" path="" targetID="org.eclipse.cdt.build.MakeTargetBuilder">
 				<buildCommand>make</buildCommand>
 				<buildArguments/>
-				<buildTarget>mod_subreqonly.la</buildTarget>
+				<buildTarget>mod_authnz_subrequest.la</buildTarget>
 				<stopOnError>true</stopOnError>
 				<useDefaultCommand>true</useDefaultCommand>
 				<runAllBuilders>false</runAllBuilders>
 			</target>
-			<target name="mod_subreqonly_la-mod_subreqonly.lo" path="" targetID="org.eclipse.cdt.build.MakeTargetBuilder">
+			<target name="mod_authnz_subrequest_la-mod_authnz_subrequest.lo" path="" targetID="org.eclipse.cdt.build.MakeTargetBuilder">
 				<buildCommand>make</buildCommand>
 				<buildArguments/>
-				<buildTarget>mod_subreqonly_la-mod_subreqonly.lo</buildTarget>
+				<buildTarget>mod_authnz_subrequest_la-mod_authnz_subrequest.lo</buildTarget>
 				<stopOnError>true</stopOnError>
 				<useDefaultCommand>true</useDefaultCommand>
 				<runAllBuilders>false</runAllBuilders>
