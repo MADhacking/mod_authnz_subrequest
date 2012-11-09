@@ -46,11 +46,6 @@
 /* Module data structure */
 extern module AP_MODULE_DECLARE_DATA authnz_subrequest_module;
 
-/* SubReqOnlyOptions */
-#define NO_OPTIONS          (1 <<  0)
-#define ALLOW_APACHE_FS     (1 <<  1)
-#define ALLOW_ALL           (1 <<  2)
-
 /* Server level configuration structure */
 typedef struct svr_cfg
 {
