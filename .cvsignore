@@ -6,3 +6,6 @@ aclocal.m4
 config.status
 Makefile
 libtool
+autom4te.cache
+*.lo
+*.la

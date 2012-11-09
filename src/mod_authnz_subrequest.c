@@ -18,62 +18,70 @@
  *  Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
  */
 
-#include "mod_subreqonly_private.h"
+#include "mod_authnz_subrequest_private.h"
 #include <mod_auth.h>
 #include <ap_provider.h>
 #include <apr_dso.h>
 #include <ctype.h>
 
+//#define _DEBUG_MAIN APLOG_WARNING
+//#define _DEBUG_CONFIG APLOG_WARNING
+
 /* Function to determine if this is an ApacheFS sub-request */
-static unsigned char is_apachefs_request(ap_filter_t *filter)
+static unsigned char is_sub_request_of_type(request_rec *r, const char* sub_text)
 {
-	// Loop through the previous requests in the chain.  If one of them is
-	// an ApacheFS filter then return true.
-	ap_filter_t *temp_filter = filter;
+	// If this is NOT a sub-request of some kind then we should just return false
+	// already, isn't it!
+    if (ap_is_initial_req(r))
+    	return FALSE;
+
+	// Loop through the filter chain in the previous request.  If one of them is
+	// specified in sub_text then return true.
+	ap_filter_t *temp_filter = r->main->output_filters;
 	while (temp_filter)
 	{
-		if (strcasecmp(temp_filter->frec->name, APACHEFS_FILTER_NAME) == 0)
+		#ifdef _DEBUG_MAIN
+			ap_log_rerror(APLOG_MARK, _DEBUG_MAIN, APR_SUCCESS, r, "is_sub_request_of_type : frec->name = %s", temp_filter->frec->name);
+		#endif
+
+		if (strcasecmp(temp_filter->frec->name, sub_text) == 0)
 			return TRUE;
 
 		temp_filter = temp_filter->next;
 	};
 
-	// We got to the end of the filter chain without finding an ApacheFS filter
-	// so return false.
+	// We got to the end of the filter chain without finding a filter with a name
+	// like that in sub_text so return false.
     return FALSE;
 }
 
-static int subreqcheck(request_rec *r)
+static int sub_request_check(request_rec *r, dir_cfg *dconf)
 {
-	ap_log_rerror(APLOG_MARK, APLOG_DEBUG, APR_SUCCESS, r, "subreqcheck");
+	#ifdef _DEBUG_MAIN
+		ap_log_rerror(APLOG_MARK, _DEBUG_MAIN, APR_SUCCESS, r, "sub_request_check");
+	#endif
+
 	// Get information regarding the Requires directives for this request.
     const apr_array_header_t *reqs_arr = ap_requires(r);
 
 	// If there are no Requires directives we are done already so decline to process.
     if (!reqs_arr)
     {
-    	ap_log_rerror(APLOG_MARK, APLOG_DEBUG, APR_SUCCESS, r, "subreqcheck : !reqs_arr");
-        return DECLINED;
+		#ifdef _DEBUG_MAIN
+			ap_log_rerror(APLOG_MARK, _DEBUG_MAIN, APR_SUCCESS, r, "sub_request_check : !reqs_arr");
+		#endif
+    	return DECLINED;
     }
-
-    // Get the (directory level) configuration information for this module.
-	dir_cfg *dconf = ap_get_module_config(r->per_dir_config, &subreqonly_module);
 
 	int m = r->method_number;
     register int x;
     const char *req_text, *req_word;
     require_line *reqs;
-    char *reason = NULL;
 
     // Loop through the Require lines...
     reqs = (require_line *)reqs_arr->elts;
     for (x = 0; x < reqs_arr->nelts; x++)
     {
-        // If we have already failed for some reason and we are authoritative then
-    	// further processing would be pointless.
-        if (reason && dconf->authoritative)
-            break;
-
         // Check that this Require line applies to the request method.
         if (!(reqs[x].method_mask & (AP_METHOD_BIT << m)))
             continue;
@@ -82,32 +90,60 @@ static int subreqcheck(request_rec *r)
         // the first word.
         req_text = reqs[x].requirement;
         req_word = ap_getword_white(r->pool, &req_text);
+		#ifdef _DEBUG_MAIN
+			ap_log_rerror(APLOG_MARK, _DEBUG_MAIN, APR_SUCCESS, r, "sub_request_check : req_word = %s", req_word);
+		#endif
 
         // If it indicates a sub-request authorisation type then this is for us...
-        if (!strcmp(req_word, "sub-request"))
+        if (!strcmp(req_word, SUBREQEST_REQUIRE))
         {
-        	// If ALLOW_ALL is set and this is a sub-request of any kind then allow it.
-        	if ((dconf->opts & ALLOW_ALL) && !ap_is_initial_req(r))
-        		return OK;
+            // Get the (server level) configuration information for this module.
+        	svr_cfg *sconf = ap_get_module_config(r->server->module_config, &authnz_subrequest_module);
 
-        	// If ALLOW_APACHE_FS is set and this is an ApacheFS sub-request then allow it.
-        	if ((dconf->opts & ALLOW_APACHE_FS) && is_apachefs_request(r->output_filters))
-        		return OK;
+        	// Loop through the remaining words...
+        	char* sub_word;
+        	while(*req_text && (sub_word = ap_getword_white(r->pool, &req_text)))
+        	{
+				#ifdef _DEBUG_MAIN
+					ap_log_rerror(APLOG_MARK, _DEBUG_MAIN, APR_SUCCESS, r, "sub_request_check : sub_word = %s", sub_word);
+				#endif
+
+        		// Is the word the special word "any"?
+        		if (!strcasecmp(sub_word, "any"))
+        		{
+        			// As "any" was specified any old sub-request will do.
+                	if (!ap_is_initial_req(r))
+                		return OK;
+        		}
+
+        		// Look for the word in the table of allowed sub-requests.
+        		const char* sub_text = apr_table_get(sconf->sub_req_table, sub_word);
+
+				#ifdef _DEBUG_MAIN
+					ap_log_rerror(APLOG_MARK, _DEBUG_MAIN, APR_SUCCESS, r, "sub_request_check : sub_text = %s", sub_text);
+				#endif
+
+        		// If we didn't find this sub_text in the table log a warning and continue.
+        		if (!sub_text)
+        		{
+        			ap_log_rerror(APLOG_MARK, APLOG_ERR, APR_SUCCESS, r, PACKAGE_NAME ": Unknown filter: %s", sub_word);
+        			return HTTP_INTERNAL_SERVER_ERROR;
+        		}
+
+        		// If we found a sub_text then see if this is that kind of sub-request.
+            	if (is_sub_request_of_type(r, sub_text))
+            		return OK;
+        	}
         }
     } // End of Require lines loop.
 
-    /*/ If we are non-authoritative then we should decline to process.
-    if (!dconf->authoritative)
-    {
-    	ap_log_rerror(APLOG_MARK, APLOG_DEBUG, APR_SUCCESS, r, "subreqcheck : !dconf->authoritative");
-    	return DECLINED;
-    }*/
-
-    // If we got this far then the request in unauthorised.
-    return HTTP_UNAUTHORIZED;
+    // If we got this far then the request is unauthorised.
+    return dconf->reject_method;
 }
 
 /**
+ * Authentication
+ *
  * This hook is used to analyse the request headers, authenticate the user,
  * and set the user information in the request record (r->user and
  * r->ap_auth_type). This hook is only run when Apache determines that
@@ -120,24 +156,61 @@ static int subreqcheck(request_rec *r)
  */
 static int check_user_id_hook(request_rec *r)
 {
-	ap_log_rerror(APLOG_MARK, APLOG_DEBUG, APR_SUCCESS, r, "check_user_id_hook");
+	#ifdef _DEBUG_MAIN
+		ap_log_rerror(APLOG_MARK, _DEBUG_MAIN, APR_SUCCESS, r, "check_user_id_hook");
+	#endif
 
-    /* Are we configured to be SubRequest auth? */
+    // If this request is NOT using SUBREQEST_AUTH_TYPE as the authentication type
+	// specified in the configuration then decline to process it.
 	const char *current_auth = ap_auth_type(r);
-    if (!current_auth || strcasecmp(current_auth, "SubRequest"))
+    if (!current_auth || strcasecmp(current_auth, SUBREQEST_AUTH_TYPE))
     {
-    	ap_log_rerror(APLOG_MARK, APLOG_DEBUG, APR_SUCCESS, r, "check_user_id_hook : DECLINED");
+		#ifdef _DEBUG_MAIN
+			ap_log_rerror(APLOG_MARK, _DEBUG_MAIN, APR_SUCCESS, r, "check_user_id_hook : DECLINED, not for us!");
+		#endif
         return DECLINED;
     }
 
-    int ret = subreqcheck(r);
+    // Get the (directory level) configuration information for this module.
+	dir_cfg *dconf = ap_get_module_config(r->per_dir_config, &authnz_subrequest_module);
 
-	r->ap_auth_type = "SubRequest";
+	#ifdef _DEBUG_CONFIG
+		ap_log_rerror(APLOG_MARK, _DEBUG_CONFIG, APR_SUCCESS, r, "check_user_id_hook : dconf->authn_authoritative = %i", dconf->authn_authoritative);
+	#endif
 
-	return ret;
+
+	// This request IS using SUBREQEST_AUTH_TYPE as the authentication type so we
+	// need to see if it is a sub-request, there is no point proceeding if it isn't.
+    if (ap_is_initial_req(r))
+    	return dconf->reject_method;
+
+    // This request IS using SUBREQEST_AUTH_TYPE as the authentication type so we
+    // need to see if it is a sub-request of the correct type.
+    int auth_result = sub_request_check(r, dconf);
+
+	#ifdef _DEBUG_MAIN
+		ap_log_rerror(APLOG_MARK, _DEBUG_MAIN, APR_SUCCESS, r, "check_user_id_hook : sub_request_check = %i", auth_result);
+	#endif
+
+    // If the sub-request checks returned anything other than OK and we ARE authoritative
+    // then we should return whatever result we got above.
+    if ((auth_result != OK) && dconf->authn_authoritative)
+    	return auth_result;
+
+    // If the sub-request checks returned anything other than OK and we are NOT authoritative
+    // then we should decline processing.
+    if (auth_result != OK)
+    	return DECLINED;
+
+    // Assuming we got this far then we have authenticated the user.  Set the authentication
+    // type for this request and indicate that all is OK.
+    r->ap_auth_type = SUBREQEST_AUTH_TYPE;
+	return OK;
 }
 
 /**
+ * Authorisation
+ *
  * This hook is used to check to see if the resource being requested
  * is available for the authenticated user (r->user and r->ap_auth_type).
  * It runs after the access_checker and check_user_id hooks. Note that
@@ -149,19 +222,25 @@ static int check_user_id_hook(request_rec *r)
  */
 static int auth_checker_hook(request_rec *r)
 {
-    // Get the current request auth type.
+	#ifdef _DEBUG_MAIN
+		ap_log_rerror(APLOG_MARK, _DEBUG_MAIN, APR_SUCCESS, r, "auth_checker_hook");
+	#endif
+
+    // Get the current request authentication type.
 	const char *current_auth = ap_auth_type(r);
 
-	// If we don't have a request type or the request auth type is NOT
-	// SubRequest then we should decline to process.
-    if (!current_auth || strcasecmp(current_auth, "SubRequest"))
+	// If we don't have an authentication type or the request authentication type is NOT
+	// our authentication type...
+    if (!current_auth || strcasecmp(current_auth, SUBREQEST_AUTH_TYPE))
     {
-    	ap_log_rerror(APLOG_MARK, APLOG_DEBUG, APR_SUCCESS, r, "auth_checker_hook : DECLINED");
+		#ifdef _DEBUG_MAIN
+			ap_log_rerror(APLOG_MARK, _DEBUG_MAIN, APR_SUCCESS, r, "auth_checker_hook : DECLINED");
+		#endif
         return DECLINED;
     }
 
-    // Presumably, if we got this far, the request auth type IS SubRequest so
-    // we can allow it.  If it did not meet the SubRequest criteria then it will
+    // Presumably, if we got this far, the request authentication type IS our authentication
+    // type so we can allow it.  If it did not meet the SubRequest criteria then it will
     // have been denied already.
     return OK;
 }
@@ -169,161 +248,71 @@ static int auth_checker_hook(request_rec *r)
 /* Function to merge a directory configuration */
 static void *merge_dir_config(apr_pool_t * p, void *basev, void *addv)
 {
-    dir_cfg *from = basev;
+	#ifdef _DEBUG_CONFIG
+		ap_log_perror(APLOG_MARK, _DEBUG_CONFIG, APR_SUCCESS, p, "merge_dir_config");
+	#endif
+
+    // dir_cfg *from = basev;
     dir_cfg *merge = addv;
     dir_cfg *to = apr_palloc(p, sizeof(dir_cfg));
 
-    /* This code comes from mod_autoindex's IndexOptions */
-    if (merge->opts & NO_OPTIONS)
-    {
-        /*
-         * If the current directory says 'no options' then we also
-         * clear any incremental mods from being inheritable further down.
-         */
-        to->opts = NO_OPTIONS;
-        to->incremented_opts = 0;
-        to->decremented_opts = 0;
-    }
-    else
-    {
-        /*
-         * If there were any nonincremental options selected for
-         * this directory, they dominate and we don't inherit *anything.*
-         * Contrariwise, we *do* inherit if the only settings here are
-         * incremental ones.
-         */
-        if (merge->opts == 0)
-        {
-            to->incremented_opts = (from->incremented_opts | merge->incremented_opts) & ~merge->decremented_opts;
-            to->decremented_opts = (from->decremented_opts | merge->decremented_opts);
-            /*
-             * We may have incremental settings, so make sure we don't
-             * inadvertently inherit an IndexOptions None from above.
-             */
-            to->opts = (from->opts & ~NO_OPTIONS);
-        }
-        else
-        {
-            /*
-             * There are local nonincremental settings, which clear
-             * all inheritance from above.  They *are* the new base settings.
-             */
-            to->opts = merge->opts;;
-        }
-        /*
-         * We're guaranteed that there'll be no overlap between
-         * the add-options and the remove-options.
-         */
-        to->opts |= to->incremented_opts;
-        to->opts &= ~to->decremented_opts;
-    }
+    // Merge the new options with those from the directory above.
+    to->authn_authoritative = merge->authn_authoritative;
+    to->authz_authoritative = merge->authz_authoritative;
+    to->reject_method		= merge->reject_method;
 
     return to;
 }
-
+/* Function to create a new server level configuration object */
 static void *create_server_cfg(apr_pool_t * p, server_rec * x)
 {
+	#ifdef _DEBUG_CONFIG
+		ap_log_perror(APLOG_MARK, _DEBUG_CONFIG, APR_SUCCESS, p, "create_server_cfg : %s", 	x->server_hostname);
+	#endif
+
+	// Allocate some memory for our svr_cfg structure from the provided pool.
     svr_cfg *cfg = apr_pcalloc(p, sizeof(svr_cfg));
 
+    // Create a new table for our sub-request types and strings and populate it with
+    // the default values.
+    cfg->sub_req_table = apr_table_make(p, 5);
+    apr_table_add(cfg->sub_req_table, "mod_transform", 	"XSLT");
+    apr_table_add(cfg->sub_req_table, "mod_include", 	"INCLUDES");
+
+    // By default we shall announce our presence in the headers.
     cfg->announce = 1;
 
     return cfg;
 }
 
+/* Function to create a new directory level configuration object */
 static void *create_dir_config(apr_pool_t * p, char *x)
 {
+	#ifdef _DEBUG_CONFIG
+		ap_log_perror(APLOG_MARK, _DEBUG_CONFIG, APR_SUCCESS, p, "create_dir_cfg : %s", x);
+	#endif
+
+	// Allocate some memory for our dir_cfg structure from the provided pool.
     dir_cfg *conf = apr_pcalloc(p, sizeof(dir_cfg));
 
-    conf->authoritative = 1;
-    conf->opts = 0;
-    conf->incremented_opts = 0;
-    conf->decremented_opts = 0;
+    // By default we should be authoritative for authentication and authorisation.
+    conf->authn_authoritative = 1;
+    conf->authz_authoritative = 1;
+
+    // We will give a real error message by default.
+    conf->reject_method = HTTP_UNAUTHORIZED;
 
     return conf;
-}
-
-static const char *add_opts(cmd_parms * cmd, void *d, const char *optstr)
-{
-    char *w;
-    apr_int32_t opts;
-    apr_int32_t opts_add;
-    apr_int32_t opts_remove;
-    char action;
-    dir_cfg *d_cfg = (dir_cfg *) d;
-
-    opts = d_cfg->opts;
-    opts_add = d_cfg->incremented_opts;
-    opts_remove = d_cfg->decremented_opts;
-    while (optstr[0])
-    {
-        int option = 0;
-
-        w = ap_getword_conf(cmd->pool, &optstr);
-
-        if ((*w == '+') || (*w == '-'))
-        {
-            action = *(w++);
-        }
-        else
-        {
-            action = '\0';
-        }
-
-
-        if (!strcasecmp(w, "AllowApacheFS"))
-        {
-            option = ALLOW_APACHE_FS;
-        }
-        else if (!strcasecmp(w, "AllowAll"))
-        {
-            option = ALLOW_ALL;
-        }
-        else if (!strcasecmp(w, "None"))
-        {
-            if (action != '\0')
-            {
-                return "Cannot combine '+' or '-' with 'None' keyword";
-            }
-            opts = NO_OPTIONS;
-            opts_add = 0;
-            opts_remove = 0;
-        }
-        else
-        {
-            return "Invalid SubReqOnlyOption";
-        }
-
-        if (action == '\0')
-        {
-            opts |= option;
-            opts_add = 0;
-            opts_remove = 0;
-        }
-        else if (action == '+')
-        {
-            opts_add |= option;
-            opts_remove &= ~option;
-        }
-        else
-        {
-            opts_remove |= option;
-            opts_add &= ~option;
-        }
-    }
-    if ((opts & NO_OPTIONS) && (opts & ~NO_OPTIONS))
-    {
-        return "Cannot combine other TransformOptions keywords with 'None'";
-    }
-    d_cfg->incremented_opts = opts_add;
-    d_cfg->decremented_opts = opts_remove;
-    d_cfg->opts = opts;
-    return NULL;
 }
 
 /* This function is registered as a command hook for the SubReqOnlyAnnounce command */
 static const char *set_announce(cmd_parms *cmd, void *struct_ptr, int arg)
 {
-    svr_cfg *cfg = ap_get_module_config(cmd->server->module_config,	&subreqonly_module);
+	#ifdef _DEBUG_CONFIG
+		ap_log_perror(APLOG_MARK, _DEBUG_CONFIG, APR_SUCCESS, cmd->pool, "set_announce");
+	#endif
+
+    svr_cfg *cfg = ap_get_module_config(cmd->server->module_config,	&authnz_subrequest_module);
 
     // SubReqOnlyAnnounce is a server wide option, check it has been used as such.
     const char *err = ap_check_cmd_context(cmd, NOT_IN_DIR_LOC_FILE | NOT_IN_LIMIT);
@@ -335,13 +324,26 @@ static const char *set_announce(cmd_parms *cmd, void *struct_ptr, int arg)
     return NULL;
 }
 
+static const char *add_subreq_type(cmd_parms *cmd, void *struct_ptr, const char *key, const char *value)
+{
+	#ifdef _DEBUG_CONFIG
+		ap_log_perror(APLOG_MARK, _DEBUG_CONFIG, APR_SUCCESS, cmd->pool, "add_subreq_type: key = %s, value = %s", key, value);
+	#endif
+
+    svr_cfg *cfg = ap_get_module_config(cmd->server->module_config,	&authnz_subrequest_module);
+
+    apr_table_add(cfg->sub_req_table, key, value);
+
+    return NULL;
+}
+
 /* Once the module is loaded, initialised, the hooks registered and the server wide
  * configuration loaded this function is executed.  Server wide configuration options
  * should be acted upon here if required.
  */
 static int post_config_hook(apr_pool_t *p, apr_pool_t *log, apr_pool_t *ptemp, server_rec *s)
 {
-    svr_cfg *cfg = ap_get_module_config(s->module_config, &subreqonly_module);
+    svr_cfg *cfg = ap_get_module_config(s->module_config, &authnz_subrequest_module);
 
     /* Add version string to Apache headers */
     if (cfg->announce)
@@ -364,7 +366,7 @@ static void register_hooks(apr_pool_t * p)
     ap_hook_check_user_id(check_user_id_hook, NULL, NULL, APR_HOOK_FIRST);
     ap_hook_auth_checker(auth_checker_hook, NULL, NULL, APR_HOOK_MIDDLE);
 
-    ap_register_provider(p, AUTHN_PROVIDER_GROUP, "subreqonly", "0", &subreqonly_module);
+    ap_register_provider(p, AUTHN_PROVIDER_GROUP, PACKAGE_NAME, PACKAGE_VERSION, &authnz_subrequest_module);
 };
 
 /* The command array.  This contains entries for the commands
@@ -372,9 +374,19 @@ static void register_hooks(apr_pool_t * p)
  */
 static const command_rec command_array[] =
 {
-    AP_INIT_RAW_ARGS("SubReqOnlyOptions", add_opts, NULL, OR_INDEXES, "One or more index options [+|-][]"),
+	AP_INIT_FLAG("Auth" SUBREQEST_AUTH_TYPE "Authoritative", ap_set_flag_slot, (void *)APR_OFFSETOF(dir_cfg, authn_authoritative),
+		OR_AUTHCFG, "Set to 'Off' to allow access control to be passed along to lower modules (default is On)."),
 
-    AP_INIT_FLAG("SubReqOnlyAnnounce", set_announce, NULL, RSRC_CONF, "Whether to announce this module in the server header. Default: On"),
+	AP_INIT_FLAG("Authz" SUBREQEST_AUTH_TYPE "Authoritative", ap_set_flag_slot, (void *)APR_OFFSETOF(dir_cfg, authz_authoritative),
+		OR_AUTHCFG, "Set to 'Off' to allow access control to be passed along to lower modules (default is On)."),
+
+    AP_INIT_FLAG(SUBREQEST_AUTH_TYPE "Announce", set_announce, NULL, RSRC_CONF, "Whether to announce this module in the server header. Default: On"),
+
+    AP_INIT_TAKE1(SUBREQEST_AUTH_TYPE "RejectMethod", ap_set_int_slot, (void *)APR_OFFSETOF(dir_cfg, reject_method),
+    	OR_AUTHCFG, "The HTTP response method code to use for rejecting access.  Default: 401"),
+
+    AP_INIT_TAKE2(SUBREQEST_AUTH_TYPE "DeclareType", add_subreq_type, NULL,
+    	RSRC_CONF, "Declare a new sub-request type using the form " SUBREQEST_AUTH_TYPE " DeclareType KEY VALUE"),
 
     {NULL}
 };
@@ -382,7 +394,7 @@ static const command_rec command_array[] =
 /* The declaration of the Apache module.  This structure contains function pointers to
  * connect the module to the daemon.
  */
-module AP_MODULE_DECLARE_DATA subreqonly_module =
+module AP_MODULE_DECLARE_DATA authnz_subrequest_module =
 {
     STANDARD20_MODULE_STUFF,
     create_dir_config,

@@ -18,13 +18,11 @@
  *  Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
  */
 
-#ifndef _MOD_SUBREQONLY_PRIVATE_H
-#define _MOD_SUBREQONLY_PRIVATE_H
+#ifndef _MOD_AUTHNZ_SUBREQEST_PRIVATE_H
+#define _MOD_AUTHNZ_SUBREQEST_PRIVATE_H
 
-#define SUBREQONLY_FILTER_NAME "SubReqOnly"
-
-#define APACHEFS_FILTER_NAME "transform_store_brigade"
-#define MOD_INCLUDE_NAME	 "INCLUDES"
+#define SUBREQEST_AUTH_TYPE	"SubRequest"
+#define SUBREQEST_REQUIRE	"sub-request"
 
 #include <httpd.h>
 #include <http_config.h>
@@ -45,26 +43,27 @@
 #undef PACKAGE_VERSION
 #include "config.h"
 
-extern module AP_MODULE_DECLARE_DATA subreqonly_module;
+/* Module data structure */
+extern module AP_MODULE_DECLARE_DATA authnz_subrequest_module;
 
 /* SubReqOnlyOptions */
 #define NO_OPTIONS          (1 <<  0)
 #define ALLOW_APACHE_FS     (1 <<  1)
 #define ALLOW_ALL           (1 <<  2)
 
+/* Server level configuration structure */
 typedef struct svr_cfg
 {
-    int announce;
-}
-svr_cfg;
+    int 			announce;
+    apr_table_t*	sub_req_table;
+} svr_cfg;
 
+/* Directory level configuration structure */
 typedef struct dir_cfg
 {
-	int authoritative;
-    apr_int32_t opts;
-    apr_int32_t incremented_opts;
-    apr_int32_t decremented_opts;
-}
-dir_cfg;
+	int authn_authoritative;
+	int authz_authoritative;
+	int reject_method;
+} dir_cfg;
 
-#endif /* _MOD_SUBREQONLY_PRIVATE_H */
+#endif /* _MOD_AUTHNZ_SUBREQEST_PRIVATE_H */
