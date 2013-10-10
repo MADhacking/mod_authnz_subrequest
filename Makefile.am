@@ -1,7 +1,7 @@
 AUTOMAKE_OPTIONS = foreign dist-bzip2
-ACLOCAL_AMFLAGS= -I m4
+ACLOCAL_AMFLAGS = -I m4
 
-moddir=${AP_LIBEXECDIR}
+moddir = ${AP_LIBEXECDIR}
 mod_LTLIBRARIES = mod_authnz_subrequest.la 
 
 mod_authnz_subrequest_la_SOURCES = src/mod_authnz_subrequest.c
