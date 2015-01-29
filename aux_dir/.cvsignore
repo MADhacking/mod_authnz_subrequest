@@ -1,8 +1,0 @@
-install-sh
-depcomp
-config.sub
-compile
-config.in
-config.guess
-missing
-ltmain.sh
