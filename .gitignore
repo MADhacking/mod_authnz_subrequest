@@ -6,3 +6,6 @@
 /Makefile
 /Makefile.in
 /aux_dir/
+*.Plo
+.autotools
+.cproject
